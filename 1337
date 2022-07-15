@@ -1,0 +1,63 @@
+#!/bin/bash
+lt="/tmp/link_title.txt"
+imgdir="/tmp/image/"
+jsondir="/tmp/json/"
+cache="/tmp/cache.html"
+apijson="/tmp/steamcmd_appid.json"
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+# Create directories if they not exist
+ls $imgdir &>/dev/null || mkdir $imgdir
+ls $jsondir &>/dev/null || mkdir $jsondir
+rm $lt
+
+# If the file is older than 1 day, download it
+# It's the steam APPList
+ls $apijson 2>/dev/null || curl https://api.steampowered.com/ISteamApps/GetAppList/v2/ | jq '' > $apijson
+# Download the page of 1337xx.to
+curl -s https://www.1337xx.to/category-search/johncena141/Games/1/ > $cache
+
+# Get the title & link of games in the page
+grep "</a></td>" $cache | while read -r line ; do
+	title=$(echo $line | grep -o -P '(?<=/">).*(?= \[)')
+	title=${title%%[*}
+	title=${title%% - *}
+	link=$(echo $line | grep -o -P '(?<=href=").*(?=">)')
+	echo "$link $title" >> $lt
+done
+
+# There is 20 items on the page
+for i in {1..20}
+do 
+	# Get the name of the game n°$i & his ID
+	name=$(head -"$i" $lt | tail -1 | sed "s/^[^ ]* //" | sed 's/[[:blank:]]*$//')
+	appid=$(cat $apijson | jq '."applist"."apps"[] | select(.name | contains("'"$name"'"))' |grep "appid" | head -1 | awk '{print $2}')
+	appid=${appid%?}
+
+	echo ""	
+	echo "=#=#=#=#=#=#=#=#=#=#=###__"$i"__###=#=#=#=#=#=#=#=#=#=#="
+
+	# Download the json
+	curl -s 'https://store.steampowered.com/api/appdetails/?appids='$appid > $jsondir$appid.json
+	# Get price
+	price=$(cat $jsondir$appid.json | jq '."'$appid'"."data"."price_overview"[]' 2> /dev/null |tail -1 )
+	#score
+	score=$(cat $jsondir$appid.json | jq '."'$appid'"."data"."metacritic".score' 2> /dev/null)
+	# genre
+	genre=$(cat $jsondir$appid.json | jq '."'$appid'"."data"."genres"[].description' 2> /dev/null)
+	# release date
+	release=$(cat $jsondir$appid.json | jq '."'$appid'"."data"."release_date".date' 2> /dev/null)
+	# Header image
+	img=$(cat $jsondir$appid.json | jq '."'$appid'"."data"."header_image"' 2> /dev/null)
+	img=$(echo $img | cut -d "\"" -f 2)
+	wget -q -O "$imgdir$appid.jpg" $img 2>/dev/null
+	echo -e "${RED}Name:${NC} $name"
+	if [ ! -z "$price" ]; then echo -e "${RED}Price:${NC} $price"; fi
+	if [ ! -z "$score" ]; then echo -e "${RED}Score:${NC} $score"; fi
+	if [ ! -z "$genre" ]; then echo -e "${RED}Genre:${NC} $genre"; fi
+	# if [ ! -z "$appid" ]; then echo -e "${RED}Appid:${NC} $appid"; fi
+	if [ ! -z "$release" ]; then echo -e "${RED}Date:${NC} $release"; fi
+	if [ ! -z "$img" ];then timg "$imgdir$appid.jpg" -p kitty -g20x20 2>/dev/null;fi
+	link=$(head -"$i" $lt |tail -1 | awk '{print $1}')
+	echo -e '\e]8;;https://www.1337xx.to'$link'\aDownload '$name'\e]8;;\a'
+done
